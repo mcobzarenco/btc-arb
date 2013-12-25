@@ -1,0 +1,20 @@
+add_executable(
+  main
+    main.cpp
+    ticker_plant.hpp
+    ticker_plant.cpp
+    market_logger.hpp
+    market_logger.cpp
+    log_reporter.hpp
+    log_reporter.cpp
+)
+target_link_libraries(
+  main
+    ${Boost_LIBRARIES}
+    ${GLOG_LIBRARY}
+    ${JSONCPP_LIBRARY}
+    pthread
+    z
+    leveldb
+    snappy
+)

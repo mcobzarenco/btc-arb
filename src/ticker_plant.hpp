@@ -1,8 +1,9 @@
 #pragma once
 
+#include <json/value.h>
 #include <websocketpp/config/asio_no_tls_client.hpp>
 #include <websocketpp/client.hpp>
-#include <json/value.h>
+
 
 #include <functional>
 #include <string>
@@ -39,6 +40,11 @@ class WebSocketTickerPlant : public TickerPlant {
   ws_client client_;
 
   std::vector<TickHandler> handlers_;
+};
+
+class LevelBacktester : public TickerPlant {
+ public:
+  LevelBacktester();
 };
 
 }  // namespace btc_arb

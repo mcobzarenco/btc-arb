@@ -28,11 +28,14 @@ LevelDBLogger::LevelDBLogger(
 }
 
 void LevelDBLogger::log_tick(const Json::Value& root) {
-  CHECK (db_) << "No open LevelDB database";
-  Json::Value copy = root;
+  CHECK (db_) << "LevelDB database not open";
+  if (!filter_(root)) {
+    return;
+  }
   leveldb::WriteOptions opts;
   stringstream key;
   Json::FastWriter writer;
+  Json::Value copy = root;
   auto now = to_string(chrono::system_clock::now().time_since_epoch().count());
   copy["_received"] = Json::Value(now);
   db_->Put(opts, now, writer.write(copy));

@@ -11,9 +11,9 @@
 #include <iomanip>
 #include <memory>
 #include <cstdlib>
-#include <string>
 #include <functional>
-#include <chrono>
+#include <string>
+#include <sstream>
 
 
 using namespace std;
@@ -21,17 +21,18 @@ using namespace btc_arb;
 
 int main(int argc, char **argv) {
   namespace po = boost::program_options;
+  namespace ph = std::placeholders;
   google::InitGoogleLogging(argv[0]);
   google::LogToStderr();
 
   string uri = "ws://websocket.mtgox.com/mtgox";
+  stringstream description_msg;
+  description_msg << "Ticker Plant (built on " << __TIMESTAMP__
+                  << ") persists market data/backtests/runs "
+                  << "live strategies.\n\nAllowed options:";
 
   auto build_time = string{__TIMESTAMP__};
-
-  auto description = po::options_description{
-    "Ticker Plant (built on " + build_time +
-    ") persists market data/backtests/runs live strategies.\n\nAllowed options:"
-  };
+  auto description = po::options_description{};
   description.add_options()
       ("help,h", "prints this help message")
       ("uri",
@@ -51,13 +52,16 @@ int main(int argc, char **argv) {
       return 0;
     }
 
-    LevelDBLogger market_logger("mark.leveldb");
-    auto tick2db = bind(&LevelDBLogger::log_tick, &market_logger, placeholders::_1);
+    auto only_trades = [](const Json::Value& root) {
+        return root["channel_name"] == "trade.BTC";
+    };
+    LevelDBLogger market_log("market.leveldb");
+    LevelDBLogger trades_log("trades.leveldb", only_trades);
 
     unique_ptr<TickerPlant> plant{new WebSocketTickerPlant(uri)};
-    plant->add_tick_handler(tick2db);
+    plant->add_tick_handler(bind(&LevelDBLogger::log_tick, &market_log, ph::_1));
+    plant->add_tick_handler(bind(&LevelDBLogger::log_tick, &trades_log, ph::_1));
     plant->add_tick_handler(report_progress_mtgox);
-    // plant->add_tick_handler(report_progress);
     plant->run();
   } catch (const boost::program_options::unknown_option& e) {
     LOG(ERROR) << e.what();
@@ -69,5 +73,4 @@ int main(int argc, char **argv) {
     LOG(ERROR) << e.what();
     return -1;
   }
-
 }

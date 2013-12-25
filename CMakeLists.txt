@@ -13,8 +13,6 @@ find_package(
     REQUIRED
 )
 find_package(JsonCpp REQUIRED)
-
-
 # find_package(Websocketspp REQUIRED)
 
 include_directories(
@@ -23,37 +21,4 @@ include_directories(
   ${JSONCPP_INCLUDE_DIR}
 )
 
-add_executable(
-  collect
-    collect.cpp
-)
-target_link_libraries(
-  collect
-    ${Boost_LIBRARIES}
-    ${GLOG_LIBRARY}
-    pthread
-    z
-    leveldb
-    snappy
-)
-
-add_executable(
-  main
-    main.cpp
-    ticker_plant.hpp
-    ticker_plant.cpp
-    market_logger.hpp
-    market_logger.cpp
-    log_reporter.hpp
-    log_reporter.cpp
-)
-target_link_libraries(
-  main
-    ${Boost_LIBRARIES}
-    ${GLOG_LIBRARY}
-    ${JSONCPP_LIBRARY}
-    pthread
-    z
-    leveldb
-    snappy
-)
+add_subdirectory(src)
