@@ -34,6 +34,7 @@ target_link_libraries(
     pthread
     z
     leveldb
+    snappy
 )
 
 add_executable(
@@ -54,4 +55,5 @@ target_link_libraries(
     pthread
     z
     leveldb
+    snappy
 )
