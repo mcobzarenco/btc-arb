@@ -17,36 +17,37 @@
 
 namespace btc_arb {
 
-class Quote {
- public:
-  enum class Type { ASK, BID };
-
-  Quote(uint64_t received_, uint64_t ex_time_, Type type_,
-        double price_, int price_int_, double volume_)
-      : received(received_), ex_time(ex_time_), type(type_),
-        price(price_), price_int(price_int_), volume(volume_) {
-  }
-
-  const uint64_t received;
-  const uint64_t ex_time;
-  const Type type;
-  const double price;
-  const int price_int;
-  const double volume;
+enum class Currency {
+  USD, EUR, GBP, JPY, BTC
 };
 
-class Trade {
- public:
-  Trade(uint64_t received_, uint64_t ex_time_,
-        double price_, int price_int_)
-      : received(received_), ex_time(ex_time_),
-        price(price_), price_int(price_int_) {
-  }
+boost::optional<Currency> from_string(const std::string& cyc);
 
+enum class QuoteType {
+  ASK, BID, BEST_ASK, BEST_BID
+};
+
+struct Quote {
   const uint64_t received;
   const uint64_t ex_time;
+  const double amount;
+  const uint64_t amount_int;  // traded amount times 1E8
+  const Currency cyc;
   const double price;
-  const int price_int;
+  const uint32_t price_int;
+  const QuoteType type;
+
+};
+
+struct Trade {
+  const uint64_t received;
+  const uint64_t ex_time;
+  const double amount;
+  const uint64_t amount_int;  // traded amount times 1E8
+  const Currency cyc;
+  const double price;
+  const uint32_t price_int;
+  const QuoteType trade_type;
 };
 
 class Tick {
@@ -55,8 +56,8 @@ class Tick {
 
   template<typename T>
   inline const T& as() {
-    CHECK (ContentInd<T>().content_type == type);
-    return *reinterpret_cast<const TickContent*>(&tickc_);
+    CHECK (ContentInd<T>::CONTENT_TYPE == type);
+    return *reinterpret_cast<const T*>(&tickc_);
   }
 
   Tick() : type(Type::EMPTY) {}
@@ -80,11 +81,11 @@ class Tick {
 };
 
 template<> class Tick::ContentInd<Quote> {
-  static constexpr Type content_type = Type::QUOTE;
+  static constexpr Type CONTENT_TYPE = Type::QUOTE;
 };
 
 template<> class Tick::ContentInd<Trade> {
-  static constexpr Type content_type = Type::TRADE;
+  static constexpr Type CONTENT_TYPE = Type::TRADE;
 };
 
 
