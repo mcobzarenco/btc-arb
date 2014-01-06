@@ -9,7 +9,6 @@
 #include <json/value.h>
 #include <json/reader.h>
 
-#include <exception>
 #include <iostream>
 #include <iomanip>
 #include <memory>
@@ -17,57 +16,52 @@
 #include <functional>
 #include <string>
 #include <sstream>
+#include <stdexcept>
+#include <vector>
 
 
 using namespace std;
 using namespace btc_arb;
 
-enum class SourceType {
-  LDB, FLAT, WS_MTGOX, LDB_MTGOX
-};
+namespace {
+enum class SourceType { FLAT, LDB, WS_MTGOX, LDB_MTGOX };
+enum class SinkType { FLAT, RAW_LDB };
+}
 
 template<> char const* utils::EnumStrings<SourceType>::names[] = {
-  "ldb", "flat", "ws_mtgox", "ldb_mtgox"};
-
-enum class SinkType {
-  FLAT, RAW_LDB
-};
-
+  "flat", "ldb", "ws_mtgox", "ldb_mtgox"};
 template<> char const* utils::EnumStrings<SinkType>::names[] = {
   "flat", "raw_ldb"};
 
-SourceType str_to_source_type(const string& s) {
-  if (s == "ldb") {
-    return SourceType::LDB;
-  } else if (s == "flat") {
-    return SourceType::FLAT;
-  } else if (s == "ws_mtgox") {
-    return SourceType::WS_MTGOX;
-  } else if (s == "ldb_mtgox") {
-    return SourceType::LDB_MTGOX;
-  } else {
-    throw boost::program_options::invalid_option_value(s);
-  }
-}
+namespace {
+template<typename T>
+struct PrependedPath {
+  static PrependedPath parse(const string& spath);
 
-struct SourcePath {
-  static SourcePath parse(const string& spath);
-
-  const SourceType type;
-  const string path;
+  T type;
+  string path;
 };
 
-SourcePath SourcePath::parse(const string& spath) {
+template<typename T>
+PrependedPath<T> PrependedPath<T>::parse(const string& spath) {
   string::size_type delim{spath.find(':')};
   if (delim == string::npos) {
     throw runtime_error("invalid path \'" + spath + "\'");
   }
   stringstream type_str{spath.substr(0, delim)};
-  SourceType type;
+  T type;
   type_str >> utils::enum_from_str(type);
   string path{spath.substr(delim + 1)};
-  return SourcePath{move(type), move(path)};
+  return PrependedPath<T>{move(type), move(path)};
 }
+
+template<typename T>
+vector<PrependedPath<T>> parse_all(const vector<string>& s) {
+  vector<PrependedPath<T>> parsed(s.size());
+  transform(s.begin(), s.end(), parsed.begin(), PrependedPath<T>::parse);
+  return parsed;
+}
+}  // anonymous namespace
 
 int main(int argc, char **argv) {
   namespace po = boost::program_options;
@@ -88,12 +82,13 @@ int main(int argc, char **argv) {
   description.add_options()
       ("help,h", "prints this help message")
       ("source",
-       po::value<string>(&source_str)->value_name("PPATH"),
+       po::value<string>(&source_str)->value_name("TYPE:PATH"),
        ("the market data souce; can also be specified as a positional arg; "
+        "available types: flat, ldb, ws_mtgox, ldb_mtgox; "
         "default=" + source_str).c_str())
       ("sink",
-       po::value<vector<string>>()->value_name("S"),
-       "specifies the source type (available: ldb, flat, ws_mtgox)");
+       po::value<vector<string>>()->value_name("TYPE:PATH"),
+       "specifies a sink for the ticks; available types: flat, raw_ldb");
   po::positional_options_description positional;
   positional.add("source", -1);
 
@@ -108,21 +103,29 @@ int main(int argc, char **argv) {
     }
 
     if (variables.count("sink")) {
+      auto sinks = variables["sink"].as<vector<string>>();
       cout << "sinks: ";
-      for (auto& s : variables["sink"].as<vector<string>>()) {
+      for (auto& s : sinks) {
         cout << s << " ";
       }
       cout << endl;
+
+      auto parsed = parse_all<SinkType>(sinks);
+      for_each(parsed.begin(), parsed.end(),
+               [](const PrependedPath<SinkType> &p) {
+                 cout << "sink " << utils::enum_to_str(p.type) << " " << p.path << endl;
+               });
     }
 
-    SourcePath spath = SourcePath::parse(source_str);
+    PrependedPath<SourceType> spath = PrependedPath<SourceType>::parse(source_str);
+    cout << "::: " << (utils::enum_to_str(spath.type)) << endl;
     unique_ptr<TickerPlant> plant{nullptr};
     switch (spath.type) {
-      case SourceType::LDB:
-        plant.reset(new LdbTickerPlant<FlatParser>(spath.path));
-        break;
       case SourceType::FLAT:
         plant.reset(new FlatFileTickerPlant(spath.path));
+        break;
+      case SourceType::LDB:
+        plant.reset(new LdbTickerPlant<FlatParser>(spath.path));
         break;
       case SourceType::WS_MTGOX:
         plant.reset(new WebSocketTickerPlant<mtgox::FeedParser>(spath.path));
@@ -131,9 +134,13 @@ int main(int argc, char **argv) {
         plant.reset(new LdbTickerPlant<mtgox::FeedParser>(spath.path));
         break;
     }
+
     // LevelDBLogger market_log("market.leveldb");
     // LevelDBLogger trades_log("trades.leveldb", only_trades);
+    vector<LdbLogger> raw_loggers;
+    vector<FileLogger> file_loggers;
     FileLogger mlog("out.flat");
+
     cout << static_cast<int>(spath.type) << " " << spath.path << endl;
 
     // unique_ptr<TickerPlant> plant{new WebSocketTickerPlant(uri)};
