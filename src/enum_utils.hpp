@@ -1,13 +1,17 @@
 #pragma once
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
-#include <algorithm>
 
 
 namespace btc_arb {
 namespace utils {
+
+// Code below is a modified version of
+// codereview.stackexchange.com/questions/14309/conversion-between-enum-and-string-in-c-class-header
 
 // This is the type that will hold all the strings.
 // Each enumerate type will declare its own specialization.
@@ -36,30 +40,25 @@ struct EnumConstRefHolder {
 // enum as a string.
 template<typename T>
 std::ostream& operator<<(std::ostream& str, EnumConstRefHolder<T> const& data) {
-  return str << EnumStrings<T>::names[data.enumVal];
+  return str << EnumStrings<T>::names[static_cast<int>(data.enumVal)];
 }
 
 template<typename T>
 std::istream& operator>>(std::istream& str, EnumRefHolder<T> const& data) {
+  static auto begin = std::begin(EnumStrings<T>::names);
+  static auto end = std::end(EnumStrings<T>::names);
+
   std::string value;
   str >> value;
-
-  // These two can be made easier to read in C++11
-  // using std::begin() and std::end()
-  //
-  static auto begin  = std::begin(EnumStrings<T>::names);
-  static auto end    = std::end(EnumStrings<T>::names);
-
-  auto find   = std::find(begin, end, value);
+  auto find = std::find(begin, end, value);
   if (find != end)
   {
     data.enumVal = static_cast<T>(std::distance(begin, find));
+    return str;
   } else {
-    throw std::runtime_error("u");
+    throw std::runtime_error("unknown endpoint type '" + value  + "'");
   }
-  return str;
 }
-
 
 // This is the public interface:
 // use the ability of function to deuce their template type without
