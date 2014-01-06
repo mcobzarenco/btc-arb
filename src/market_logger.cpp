@@ -10,8 +10,7 @@ namespace btc_arb {
 
 using namespace std;
 
-
-LevelDBLogger::LevelDBLogger(const string& path_to_db) {
+LdbLogger::LdbLogger(const string& path_to_db) {
   leveldb::DB *ptr_db{nullptr};
   leveldb::Options options;
   options.create_if_missing = true;
@@ -27,8 +26,4 @@ LevelDBLogger::LevelDBLogger(const string& path_to_db) {
 FileLogger::FileLogger(const std::string& path_to_file) {
   file_.open(path_to_file, ios::out | ios::app);
 }
-
-
-
-
 }  // namespace btc_arb

@@ -15,11 +15,11 @@
 
 namespace btc_arb {
 
-class LevelDBLogger {
+class LdbLogger {
  public:
-  LevelDBLogger(const std::string& path_to_db);
+  LdbLogger(const std::string& path_to_db);
 
-  LevelDBLogger(const LevelDBLogger&) = delete;
+  LdbLogger(const LdbLogger&) = delete;
 
   inline void log(const std::string& key, const std::string& value);
  private:
@@ -27,13 +27,13 @@ class LevelDBLogger {
   std::unique_ptr<leveldb::DB> db_;
 };
 
-void LevelDBLogger::log(const std::string& key, const std::string& value) {
+void LdbLogger::log(const std::string& key, const std::string& value) {
   CHECK (db_) << "LevelDB database not open";
   leveldb::WriteOptions opts;
   db_->Put(opts, key, value);
 }
 
-// void to_leveldb_key_timestamp(LevelDBLogger& logger, const std::string& msg) {
+// void to_leveldb_key_timestamp(LdbLogger& logger, const std::string& msg) {
 //   std::string now = std::to_string(
 //       std::chrono::system_clock::now().time_since_epoch().count());
 //   logger.log(now, msg);
