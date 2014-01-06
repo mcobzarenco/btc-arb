@@ -45,10 +45,16 @@ class FileLogger {
 
   FileLogger(const FileLogger&) = delete;
 
+  inline void log(const char* tick, size_t size);
   inline void log(const std::string& tick);
  private:
   std::ofstream file_;
 };
+
+void FileLogger::log(const char* tick, size_t size) {
+  CHECK (file_.is_open()) << "file not open";
+  file_.write(tick, size);
+}
 
 void FileLogger::log(const std::string& tick) {
   CHECK (file_.is_open()) << "file not open";

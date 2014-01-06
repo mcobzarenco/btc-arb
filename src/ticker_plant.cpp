@@ -16,19 +16,19 @@ using websocketpp::lib::bind;
 
 using namespace std;
 
-boost::optional<Currency> from_string(const std::string& cyc) {
-  string norm;
-  std::transform(cyc.begin(), cyc.end(), norm.begin(), ::tolower);
+boost::optional<const Currency> ccy_from_string(const std::string& cyc) {
+  string norm = cyc;
+  transform(cyc.begin(), cyc.end(), norm.begin(), ::tolower);
   if (norm == "usd") {
-    return boost::optional<Currency>(Currency::USD);
+    return boost::optional<const Currency>(Currency::USD);
   } else if (norm == "eur") {
-    return boost::optional<Currency>(Currency::EUR);
+    return boost::optional<const Currency>(Currency::EUR);
   }  else if (norm == "gbp") {
-    return boost::optional<Currency>(Currency::GBP);
+    return boost::optional<const Currency>(Currency::GBP);
   }  else if (norm == "jpy") {
-    return boost::optional<Currency>(Currency::JPY);
+    return boost::optional<const Currency>(Currency::JPY);
   } else {
-    return boost::optional<Currency>();
+    return boost::optional<const Currency>();
   }
 }
 

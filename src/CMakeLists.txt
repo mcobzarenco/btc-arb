@@ -7,6 +7,8 @@ add_executable(
     market_logger.cpp
     log_reporter.hpp
     log_reporter.cpp
+    mtgox.hpp
+    enum_utils.hpp
 )
 target_link_libraries(
   main

@@ -17,37 +17,44 @@
 
 namespace btc_arb {
 
+constexpr int VOLUME_MULTIPLIER = 100000000;  // 1E8
+
 enum class Currency {
   USD, EUR, GBP, JPY, BTC
 };
 
-boost::optional<Currency> from_string(const std::string& cyc);
-
-enum class QuoteType {
-  ASK, BID, BEST_ASK, BEST_BID
-};
+boost::optional<const Currency> ccy_from_string(const std::string& cyc);
 
 struct Quote {
+  enum class Type {
+    ASK_UPDATE, BID_UPDATE,
+  };
+
   const uint64_t received;
   const uint64_t ex_time;
-  const double amount;
-  const uint64_t amount_int;  // traded amount times 1E8
+  const Type type;
+  const double delta_volume;
+  const int64_t delta_volume_int;
+  const double total_volume;
+  const int64_t total_volume_int;  // volume times VOLUME_MULTIPLIER (1E8)
   const Currency cyc;
   const double price;
-  const uint32_t price_int;
-  const QuoteType type;
-
+  const int32_t price_int;
 };
 
 struct Trade {
+  enum class Type {
+    ASK, BID
+  };
+
   const uint64_t received;
   const uint64_t ex_time;
+  const Type type;
   const double amount;
-  const uint64_t amount_int;  // traded amount times 1E8
+  const int64_t amount_int;  // amount times 1E8
   const Currency cyc;
   const double price;
-  const uint32_t price_int;
-  const QuoteType trade_type;
+  const int32_t price_int;
 };
 
 class Tick {
@@ -55,7 +62,7 @@ class Tick {
   enum class Type { EMPTY, QUOTE, TRADE };
 
   template<typename T>
-  inline const T& as() {
+  inline const T& as() const {
     CHECK (ContentInd<T>::CONTENT_TYPE == type);
     return *reinterpret_cast<const T*>(&tickc_);
   }
@@ -80,13 +87,15 @@ class Tick {
   const TickContent tickc_;
 };
 
-template<> class Tick::ContentInd<Quote> {
+template<> struct Tick::ContentInd<Quote> {
   static constexpr Type CONTENT_TYPE = Type::QUOTE;
 };
+// constexpr Tick::Type Tick::ContentInd<Quote>::CONTENT_TYPE;
 
-template<> class Tick::ContentInd<Trade> {
+template<> struct Tick::ContentInd<Trade> {
   static constexpr Type CONTENT_TYPE = Type::TRADE;
 };
+// constexpr Tick::Type Tick::ContentInd<Trade>::CONTENT_TYPE;
 
 
 using TickHandler = std::function<void(const Tick&)>;
@@ -147,7 +156,7 @@ bool WebSocketTickerPlant<Parser>::run() {
 template<typename Parser>
 void WebSocketTickerPlant<Parser>::dispatcher(
     websocketpp::connection_hdl hdl, message_ptr msg) {
-  boost::optional<Tick> tick = Parser::parse(msg->get_payload());
+  boost::optional<const Tick> tick = Parser::parse(msg->get_payload());
   if (tick) {
     call_handlers(*tick);
   } else {
@@ -199,14 +208,10 @@ bool LdbTickerPlant<Parser>::run() {
 
   std::unique_ptr<leveldb::Iterator> it(db->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    boost::optional<Tick> tick = Parser::parse(it->value().ToString());
+    boost::optional<const Tick> tick = Parser::parse(it->value().ToString());
     if (tick) {
-        call_handlers(*tick);
-    } else {
-        // LOG(WARNING) << "Could not parse tick:" << it->value().ToString();
+      call_handlers(*tick);
     }
-    // LOG(WARNING) << "Could not parse tick (" << reader.getFormattedErrorMessages()
-    //              << ") raw tick=" << it->value().ToString();
   }
   return it->status().ok();
 }
