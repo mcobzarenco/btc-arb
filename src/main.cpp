@@ -20,15 +20,20 @@
 using namespace std;
 using namespace btc_arb;
 
-namespace {
+namespace btc_arb {
 enum class SourceType { FLAT, FLAT_MTGOX, WS_MTGOX };
 enum class SinkType { FLAT, FLAT_RAW };
-}
 
-template<> char const* utils::EnumStrings<SourceType>::names[] = {
-  "flat", "flat_mtgox", "ws_mtgox"};
-template<> char const* utils::EnumStrings<SinkType>::names[] = {
-  "flat", "flat_raw"};
+template<> struct EnumStrings<SourceType> {
+    static constexpr const char* names[] = {"flat", "flat_mtgox", "ws_mtgox"};
+};
+constexpr const char* EnumStrings<SourceType>::names[];
+
+template<> struct EnumStrings<SinkType> {
+    static constexpr const char* names[] = {"flat", "flat_raw"};
+};
+constexpr const char* EnumStrings<SinkType>::names[];
+}
 
 namespace {
 template<typename T>
@@ -49,7 +54,7 @@ PrependedPath<T> PrependedPath<T>::parse(const string& spath) {
   stringstream type_str{spath.substr(0, delim), ios::in};
   string path{spath.substr(delim + 1)};
   T type;
-  type_str >> utils::enum_from_str(type);
+  type_str >> enum_from_str(type);
   return PrependedPath<T>{move(type), move(path)};
 }
 
@@ -82,11 +87,11 @@ int main(int argc, char **argv) {
       ("source",
        po::value<string>(&source_str)->value_name("TYPE:PATH"),
        ("the market data souce; can also be specified as a positional arg; "
-        "available types: flat, ldb, ws_mtgox, ldb_mtgox; "
+        "available types: flat, flat_mtgox, ws_mtgox; "
         "default=" + source_str).c_str())
       ("sink",
        po::value<vector<string>>()->value_name("TYPE:PATH"),
-       "specifies a sink for the ticks; available types: flat, raw_ldb");
+       "specifies a sink for the ticks; available types: flat, flat_raw");
   po::positional_options_description positional;
   positional.add("source", -1);
 
@@ -114,31 +119,29 @@ int main(int argc, char **argv) {
         break;
     }
 
-    vector<FileLogger> loggers;
     if (variables.count("sink")) {
       auto sinks = PrependedPath<SinkType>::parse_all(
           variables["sink"].as<vector<string>>());
-      loggers.reserve(sinks.size());
       for_each(sinks.begin(), sinks.end(),
-               [&loggers, &plant](const PrependedPath<SinkType> &sink) {
+               [&plant](const PrependedPath<SinkType> &sink) {
                  using TickLog = void(FileLogger::*)(const Tick&);
                  using RawLog = void(FileLogger::*)(const string&);
-                 loggers.emplace_back(sink.path);
+                 FileLogger logger(sink.path);
                  switch(sink.type) {
                    case SinkType::FLAT: {
                      auto handler = bind(static_cast<TickLog>(&FileLogger::log),
-                                         &loggers.back(), ph::_1);
-                     plant->add_tick_handler(handler);
+                                         move(logger), ph::_1);
+                     plant->add_tick_handler(move(handler));
                      break;
                    }
                    case SinkType::FLAT_RAW: {
-                     auto handler = bind(static_cast<RawLog>(&FileLogger::log),
-                                         &loggers.back(), ph::_1);
-                     plant->add_raw_handler(handler);
+                     RawHandler handler{bind(static_cast<RawLog>(&FileLogger::log),
+                                             move(logger), ph::_1)};
+                      plant->add_raw_handler(move(handler));
                      break;
                    }
                  }
-                 cout << "sink " << utils::enum_to_str(sink.type) << " "
+                 cout << "sink " << enum_to_str(sink.type) << " "
                       << sink.path << endl;
                });
     }

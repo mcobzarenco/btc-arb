@@ -28,12 +28,13 @@ class FeedParser {
  private:
   inline boost::optional<Tick> parse_trade(
       const Json::Value& root, uint64_t received);
-
   inline boost::optional<Tick> parse_depth(
       const Json::Value& root, uint64_t received);
-
   inline boost::optional<Tick> parse_ticker(
       const Json::Value& root, uint64_t received);
+
+  template<typename EnumType>
+  inline EnumType str_to_enum(std::string str);
 };
 
 boost::optional<const ParsedTick> FeedParser::parse(
@@ -49,7 +50,9 @@ boost::optional<const ParsedTick> FeedParser::parse(
     if (received == 0) {
       received = std::chrono::system_clock::now().time_since_epoch().count();
     }
-    root["_received"] = std::to_string(received);
+    if(root.get("_received", 0).asUInt64() == 0) {
+      root["_received"] = Json::Value{static_cast<Json::UInt64>(received)};
+    }
     const std::string tick_type = root.get("channel", "").asString();
     boost::optional<Tick> tick;
     if (tick_type == CHANNEL_TRADES) {
@@ -62,7 +65,7 @@ boost::optional<const ParsedTick> FeedParser::parse(
       LOG(WARNING) << "Unknown channel \'" << tick_type << "\' in tick=" << msg;
     }
     if(tick) {
-      return boost::optional<const ParsedTick>(ParsedTick{*tick, writer.write(root) + "\n"});
+      return boost::optional<const ParsedTick>(ParsedTick{*tick, writer.write(root)});
     }
     return boost::optional<const ParsedTick>();
   } else {
@@ -76,29 +79,13 @@ boost::optional<Tick> FeedParser::parse_trade(
     const Json::Value& root, const uint64_t received) {
   try {
     const uint64_t ex_time{root["stamp"].asUInt64()};
-
-    Trade::Type trade_type;
-    std::string type_str{root["trade"].get("trade_type", "").asString()};
-    std::transform(type_str.begin(), type_str.end(), type_str.begin(), ::tolower);
-    if (type_str == "bid") {
-      trade_type = Trade::Type::BID;
-    } else if (type_str == "ask") {
-      trade_type = Trade::Type::ASK;
-    } else {
-      throw std::runtime_error("unknown trade_type \'" + type_str + "\'");
-    }
-
+    Trade::Type trade_type = str_to_enum<Trade::Type>(
+        root["trade"].get("trade_type", "").asString());
     const double amount{root["trade"].get("amount", 0.0).asDouble()};
     const int64_t amount_int{
       std::stoll(root["trade"].get("amount_int", 0).asString())};
-
-    const std::string cyc_str{root["trade"].get("price_currency", "").asString()};
-    boost::optional<const Currency> cyc_maybe =  ccy_from_string(cyc_str);
-    if (!cyc_maybe) {
-      throw std::runtime_error("unknown currency \'" + cyc_str + "\'");
-    }
-    const Currency cyc = *cyc_maybe;
-
+    const Currency cyc(str_to_enum<Currency>(
+        root["trade"].get("price_currency", "").asString()));
     const double price{root["trade"].get("price", 0.0).asDouble()};
     const int32_t price_int{std::stoi(root["trade"].get("price_int", 0).asString())};
     return boost::optional<Tick>(Trade{
@@ -133,14 +120,8 @@ boost::optional<Tick> FeedParser::parse_depth(const Json::Value& root,
       std::stoll(depth.get("total_volume_int", "").asString())};
     const double total_volume{
       static_cast<double>(total_volume_int) / VOLUME_MULTIPLIER};
-
-    const std::string cyc_str{root["depth"].get("currency", "").asString()};
-    boost::optional<const Currency> cyc_maybe =  ccy_from_string(cyc_str);
-    if (!cyc_maybe) {
-      throw std::runtime_error("unknown currency \'" + cyc_str + "\'");
-    }
-    const Currency cyc = *cyc_maybe;
-
+    const Currency cyc(str_to_enum<Currency>(
+        root["depth"].get("currency", "").asString()));
     const double price{std::stod(depth.get("price", "").asString())};
     const int32_t price_int{std::stoi(depth.get("price_int", "").asString())};
     return boost::optional<Tick>(Quote{received, ex_time, quote_type,
@@ -159,5 +140,13 @@ boost::optional<Tick> FeedParser::parse_ticker(const Json::Value& root,
   return boost::optional<Tick>();
 }
 
+template<typename EnumType>
+EnumType FeedParser::str_to_enum(std::string str) {
+  EnumType enum_type;
+  std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+  std::stringstream type_stream{str, std::ios::in};
+  type_stream >> enum_from_str(enum_type);
+  return enum_type;
+}
 
 }}  // namespace btc_arb::mtgox

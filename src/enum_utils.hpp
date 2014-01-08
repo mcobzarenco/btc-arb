@@ -8,7 +8,6 @@
 
 
 namespace btc_arb {
-namespace utils {
 
 // Code below is a modified version of
 // codereview.stackexchange.com/questions/14309/conversion-between-enum-and-string-in-c-class-header
@@ -20,7 +19,7 @@ namespace utils {
 // be no definition of a generic version).
 template<typename T>
 struct EnumStrings {
-  static char const* names[];
+  //static constexpr char* names[];
 };
 
 // This is a utility type.
@@ -69,4 +68,4 @@ EnumConstRefHolder<T>  enum_to_str(T const& e) {return EnumConstRefHolder<T>(e);
 template<typename T>
 EnumRefHolder<T>       enum_from_str(T& e)     {return EnumRefHolder<T>(e);}
 
-}}  // namespace btc_arb::utils
+}  // namespace btc_arb

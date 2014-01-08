@@ -16,27 +16,21 @@ using websocketpp::lib::bind;
 
 using namespace std;
 
+constexpr const char* EnumStrings<Currency>::names[];
+constexpr const char* EnumStrings<Quote::Type>::names[];
+constexpr const char* EnumStrings<Trade::Type>::names[];
+
 void TickerPlant::add_tick_handler(TickHandler&& handler) {
-  handlers_.emplace_back(handler);
+  handlers_.emplace_back(move(handler));
 }
 
-template<typename Parser>
-FileTickerPlant<Parser>::FileTickerPlant(const std::string& path_to_file) {
-  file_.open(path_to_file, std::ios::in | std::ios::binary);
+void TickerPlant::add_raw_handler(RawHandler&& handler) {
+  raw_handlers_.emplace_back(move(handler));
 }
 
-template<typename Parser>
-bool FileTickerPlant<Parser>::run() {
-  CHECK (file_.is_open()) << "file not open";
-  boost::optional<const ParsedTick> parsed;
-  while (file_) {
-    parsed = Parser::parse(file_);
-    if (parsed) {
-      call_handlers((*parsed).tick);
-    }
-  }
-  return true;
+FileLogger::FileLogger(const std::string& path_to_file) {
+  file_.reset(new std::ofstream());
+  file_->open(path_to_file, std::ios::out | std::ios::app);
 }
-
 
 }  // namespace btc_arb

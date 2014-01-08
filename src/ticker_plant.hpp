@@ -17,20 +17,16 @@
 #include <cstdint>
 #include <vector>
 
-
 namespace btc_arb {
-
 constexpr int VOLUME_MULTIPLIER = 100000000;  // 1E8
 
 enum class Currency {
   USD, EUR, GBP, JPY, BTC
 };
 
-template<> char const* utils::EnumStrings<Currency>::names[] = {
-  "usd", "eur", "gbp", "jpy", "btc"};
-
-
-boost::optional<const Currency> ccy_from_string(const std::string& cyc);
+template<> struct EnumStrings<Currency>  {
+    static constexpr const char* names[] = {"usd", "eur", "gbp", "jpy", "btc"};
+};
 
 struct Quote {
   enum class Type {
@@ -49,6 +45,10 @@ struct Quote {
   int32_t price_int;
 };
 
+template<> struct EnumStrings<Quote::Type> {
+    static constexpr const char* names[] = {"ask_update", "bid_update"};
+};
+
 struct Trade {
   enum class Type {
     ASK, BID
@@ -62,6 +62,10 @@ struct Trade {
   Currency cyc;
   double price;
   int32_t price_int;
+};
+
+template<> struct EnumStrings<Trade::Type> {
+    static constexpr const char* names[] = {"ask", "bid"};
 };
 
 class Tick {
@@ -102,13 +106,10 @@ class Tick {
 template<> struct Tick::ContentInd<Quote> {
   static constexpr Type CONTENT_TYPE = Type::QUOTE;
 };
-// constexpr Tick::Type Tick::ContentInd<Quote>::CONTENT_TYPE;
 
 template<> struct Tick::ContentInd<Trade> {
   static constexpr Type CONTENT_TYPE = Type::TRADE;
 };
-// constexpr Tick::Type Tick::ContentInd<Trade>::CONTENT_TYPE;
-
 
 using TickHandler = std::function<void(const Tick&)>;
 using RawHandler = std::function<void(const std::string&)>;
@@ -204,10 +205,9 @@ void WebSocketTickerPlant<Parser>::dispatcher(
 }
 
 template<typename Parser>
-class FileTickerPlant : public TickerPlant {
+class FileTickerPlant : public TickerPlant, Parser {
  public:
   FileTickerPlant(const std::string& path_to_file);
-
   FileTickerPlant(const FileTickerPlant&) = delete;
 
   virtual bool run() override;
@@ -215,24 +215,37 @@ class FileTickerPlant : public TickerPlant {
   std::ifstream file_;
 };
 
+template<typename Parser>
+FileTickerPlant<Parser>::FileTickerPlant(const std::string& path_to_file) {
+    file_.open(path_to_file, std::ios::in | std::ios::binary);
+}
+
+template<typename Parser>
+bool FileTickerPlant<Parser>::run() {
+    CHECK (file_.is_open()) << "file not open";
+    boost::optional<ParsedTick> parsed;
+    while (file_) {
+        parsed = Parser::parse(file_);
+        if (parsed) {
+            call_handlers((*parsed).tick);
+        }
+    }
+    return true;
+}
+
 class FileLogger {
  public:
   FileLogger(const std::string& path_to_file);
 
-  FileLogger(const FileLogger&) = delete;
+  FileLogger(const FileLogger&) = default;
   FileLogger(FileLogger&&) = default;
 
   inline void log(const char* tick, size_t size);
   inline void log(const std::string& msg);
   inline void log(const Tick& tick);
  private:
-  std::unique_ptr<std::ofstream> file_;
+  std::shared_ptr<std::ofstream> file_;
 };
-
-FileLogger::FileLogger(const std::string& path_to_file) {
-  file_.reset(new std::ofstream());
-  file_->open(path_to_file, std::ios::out | std::ios::app);
-}
 
 void FileLogger::log(const char* tick, size_t size) {
   CHECK (file_->is_open()) << "file not open";
