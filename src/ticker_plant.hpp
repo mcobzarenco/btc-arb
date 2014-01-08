@@ -1,5 +1,7 @@
 #pragma once
 
+#include "enum_utils.hpp"
+
 #include <boost/optional.hpp>
 #include <glog/logging.h>
 #include <json/value.h>
@@ -11,6 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <string>
+#include <sstream>
 #include <cstdint>
 #include <vector>
 
@@ -23,6 +26,10 @@ enum class Currency {
   USD, EUR, GBP, JPY, BTC
 };
 
+template<> char const* utils::EnumStrings<Currency>::names[] = {
+  "usd", "eur", "gbp", "jpy", "btc"};
+
+
 boost::optional<const Currency> ccy_from_string(const std::string& cyc);
 
 struct Quote {
@@ -30,16 +37,16 @@ struct Quote {
     ASK_UPDATE, BID_UPDATE,
   };
 
-  const uint64_t received;
-  const uint64_t ex_time;
-  const Type type;
-  const double delta_volume;
-  const int64_t delta_volume_int;
-  const double total_volume;
-  const int64_t total_volume_int;  // volume times VOLUME_MULTIPLIER (1E8)
-  const Currency cyc;
-  const double price;
-  const int32_t price_int;
+  uint64_t received;
+  uint64_t ex_time;
+  Type type;
+  double delta_volume;
+  int64_t delta_volume_int;
+  double total_volume;
+  int64_t total_volume_int;  // volume times VOLUME_MULTIPLIER (1E8)
+  Currency cyc;
+  double price;
+  int32_t price_int;
 };
 
 struct Trade {
@@ -47,14 +54,14 @@ struct Trade {
     ASK, BID
   };
 
-  const uint64_t received;
-  const uint64_t ex_time;
-  const Type type;
-  const double amount;
-  const int64_t amount_int;  // amount times 1E8
-  const Currency cyc;
-  const double price;
-  const int32_t price_int;
+  uint64_t received;
+  uint64_t ex_time;
+  Type type;
+  double amount;
+  int64_t amount_int;  // amount times 1E8
+  Currency cyc;
+  double price;
+  int32_t price_int;
 };
 
 class Tick {
@@ -70,6 +77,8 @@ class Tick {
   Tick() : type(Type::EMPTY) {}
   Tick(const Quote& quote) : type(Type::QUOTE), tickc_{quote} {}
   Tick(const Trade& trade) : type(Type::TRADE), tickc_{trade} {}
+  Tick(const Tick&) = default;
+  Tick& operator=(const Tick&) = default;
 
  private:
   template<typename T>  class ContentInd {};
@@ -77,14 +86,17 @@ class Tick {
     TickContent() {}
     TickContent(const Quote& quote_) : quote(quote_) {}
     TickContent(const Trade& trade_) : trade(trade_) {}
+    TickContent(const TickContent&) = default;
+    TickContent& operator=(const TickContent&) = default;
+
     Quote quote;
     Trade trade;
   };
 
  public:
-  const Type type;
+  Type type;
  private:
-  const TickContent tickc_;
+  TickContent tickc_;
 };
 
 template<> struct Tick::ContentInd<Quote> {
@@ -99,23 +111,48 @@ template<> struct Tick::ContentInd<Trade> {
 
 
 using TickHandler = std::function<void(const Tick&)>;
-using TickFilter = std::function<bool(const Tick&)>;
+using RawHandler = std::function<void(const std::string&)>;
 
 class TickerPlant {
  public:
   void add_tick_handler(TickHandler&& handler);
+  void add_raw_handler(RawHandler&& handler);
   virtual bool run() = 0;
  protected:
   inline void call_handlers(const Tick& tick);
+  inline void call_raw_handlers(const std::string& msg);
 
   std::vector<TickHandler> handlers_;
+  std::vector<RawHandler> raw_handlers_;
 };
 
 void TickerPlant::call_handlers(const Tick& tick) {
-    for(auto& handler : handlers_) {
-        handler(tick);
-    }
+  for(auto& handler : handlers_) {
+    handler(tick);
+  }
 }
+
+void TickerPlant::call_raw_handlers(const std::string& msg) {
+  for(auto& handler : raw_handlers_) {
+    handler(msg);
+  }
+}
+
+struct ParsedTick {
+  Tick tick;
+  std::string raw;
+};
+
+class FlatParser {
+ protected:
+  inline boost::optional<const ParsedTick> parse(std::istream& stream) {
+    Tick tick;
+    if (stream.read(reinterpret_cast<char*>(&tick), sizeof(Tick))) {
+      return boost::optional<const ParsedTick>(ParsedTick{tick, ""});
+    }
+    return boost::optional<const ParsedTick>{};
+  }
+};
 
 template<typename Parser>
 class WebSocketTickerPlant : public TickerPlant, Parser {
@@ -156,75 +193,59 @@ bool WebSocketTickerPlant<Parser>::run() {
 template<typename Parser>
 void WebSocketTickerPlant<Parser>::dispatcher(
     websocketpp::connection_hdl hdl, message_ptr msg) {
-  boost::optional<const Tick> tick = Parser::parse(msg->get_payload());
-  if (tick) {
-    call_handlers(*tick);
+  std::stringstream stream{msg->get_payload()};
+  boost::optional<const ParsedTick> parsed = Parser::parse(stream);
+  if (parsed) {
+    call_handlers((*parsed).tick);
+    call_raw_handlers((*parsed).raw);
   } else {
     LOG(INFO) << "un-handled event";
   }
 }
 
-class FlatParser {
- protected:
-  inline boost::optional<const Tick> parse(const std::string& msg) {
-    return boost::optional<const Tick>(*reinterpret_cast<const Tick*>(msg.c_str()));
-  }
-};
-
 template<typename Parser>
-class LdbTickerPlant : public TickerPlant, Parser {
+class FileTickerPlant : public TickerPlant {
  public:
-  LdbTickerPlant(const std::string& path_to_db);
+  FileTickerPlant(const std::string& path_to_file);
 
-  LdbTickerPlant(const LdbTickerPlant&) = delete;
-
-  virtual bool run() override;
- private:
-  std::string path_to_db_;
-  std::vector<TickHandler> handlers_;
-};
-
-template<typename Parser>
-LdbTickerPlant<Parser>::LdbTickerPlant(const std::string& path_to_db)
-    : path_to_db_(path_to_db) {
-}
-
-template<typename Parser>
-bool LdbTickerPlant<Parser>::run() {
-  std::unique_ptr<leveldb::DB> db;
-  {
-    leveldb::DB *ptr_db{nullptr};
-    leveldb::Options options;
-    options.create_if_missing = false;
-    leveldb::Status status =
-        leveldb::DB::Open(options, path_to_db_, &ptr_db);
-    if (!status.ok()) {
-      LOG(FATAL) << status.ToString();
-      return false;
-    }
-    db.reset(ptr_db);
-  }
-  CHECK (db) << "LevelDB database not open";
-
-  std::unique_ptr<leveldb::Iterator> it(db->NewIterator(leveldb::ReadOptions()));
-  for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    boost::optional<const Tick> tick = Parser::parse(it->value().ToString());
-    if (tick) {
-      call_handlers(*tick);
-    }
-  }
-  return it->status().ok();
-}
-
-class FlatFileTickerPlant : public TickerPlant {
- public:
-  FlatFileTickerPlant(const std::string& path_to_file);
-
-  FlatFileTickerPlant(const FlatFileTickerPlant&) = delete;
+  FileTickerPlant(const FileTickerPlant&) = delete;
 
   virtual bool run() override;
  private:
   std::ifstream file_;
 };
+
+class FileLogger {
+ public:
+  FileLogger(const std::string& path_to_file);
+
+  FileLogger(const FileLogger&) = delete;
+  FileLogger(FileLogger&&) = default;
+
+  inline void log(const char* tick, size_t size);
+  inline void log(const std::string& msg);
+  inline void log(const Tick& tick);
+ private:
+  std::unique_ptr<std::ofstream> file_;
+};
+
+FileLogger::FileLogger(const std::string& path_to_file) {
+  file_.reset(new std::ofstream());
+  file_->open(path_to_file, std::ios::out | std::ios::app);
+}
+
+void FileLogger::log(const char* tick, size_t size) {
+  CHECK (file_->is_open()) << "file not open";
+  file_->write(tick, size);
+}
+
+void FileLogger::log(const std::string& msg) {
+  CHECK (file_->is_open()) << "file not open";
+  (*file_) << msg;
+}
+
+void FileLogger::log(const Tick& tick) {
+  log(reinterpret_cast<const char *>(&tick), sizeof(Tick));
+}
 
 }  // namespace btc_arb

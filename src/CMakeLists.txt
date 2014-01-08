@@ -3,8 +3,6 @@ add_executable(
     main.cpp
     ticker_plant.hpp
     ticker_plant.cpp
-    market_logger.hpp
-    market_logger.cpp
     log_reporter.hpp
     log_reporter.cpp
     mtgox.hpp

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ticker_plant.hpp"
-#include "market_logger.hpp"
 
 #include <json/value.h>
 #include <json/reader.h>
@@ -12,7 +11,6 @@
 #include <cstdint>
 #include <chrono>
 #include <string>
-
 #include <iostream>
 
 
@@ -25,48 +23,56 @@ constexpr char CHANNEL_DEPTH[] = "24e67e0d-1cad-4cc0-9e7a-f8523ef460fe";
 
 class FeedParser {
  protected:
-  inline boost::optional<const Tick> parse(
-      const std::string& msg, uint64_t received = 0);
+  inline boost::optional<const ParsedTick> parse(
+      std::istream& stream, uint64_t received = 0);
  private:
-  inline boost::optional<const Tick> parse_trade(
+  inline boost::optional<Tick> parse_trade(
       const Json::Value& root, uint64_t received);
 
-  inline boost::optional<const Tick> parse_depth(
+  inline boost::optional<Tick> parse_depth(
       const Json::Value& root, uint64_t received);
 
-  inline boost::optional<const Tick> parse_ticker(
+  inline boost::optional<Tick> parse_ticker(
       const Json::Value& root, uint64_t received);
 };
 
-boost::optional<const Tick> FeedParser::parse(
-    const std::string& msg, uint64_t received) {
+boost::optional<const ParsedTick> FeedParser::parse(
+    std::istream& stream, uint64_t received) {
   Json::Value root;
   Json::Reader reader;
+  Json::FastWriter writer;
   Json::StyledWriter w;
+  std::string msg;
+  std::getline(stream, msg);
   if (reader.parse(msg, root)) {
     // std::cout << w.write(root);
     if (received == 0) {
       received = std::chrono::system_clock::now().time_since_epoch().count();
     }
+    root["_received"] = std::to_string(received);
     const std::string tick_type = root.get("channel", "").asString();
+    boost::optional<Tick> tick;
     if (tick_type == CHANNEL_TRADES) {
-      return parse_trade(root, received);
+      tick = parse_trade(root, received);
     } else if (tick_type == CHANNEL_DEPTH) {
-      return parse_depth(root, received);
+      tick = parse_depth(root, received);
     } else if (tick_type == CHANNEL_TICKER) {
-      return parse_ticker(root, received);
+      tick = parse_ticker(root, received);
     } else {
       LOG(WARNING) << "Unknown channel \'" << tick_type << "\' in tick=" << msg;
-      return boost::optional<const Tick>();
     }
+    if(tick) {
+      return boost::optional<const ParsedTick>(ParsedTick{*tick, writer.write(root) + "\n"});
+    }
+    return boost::optional<const ParsedTick>();
   } else {
     LOG(WARNING) << "Could not parse tick (" << reader.getFormattedErrorMessages()
                  << ") raw tick=" << msg;
-    return boost::optional<const Tick>();
+    return boost::optional<const ParsedTick>();
   }
 }
 
-boost::optional<const Tick> FeedParser::parse_trade(
+boost::optional<Tick> FeedParser::parse_trade(
     const Json::Value& root, const uint64_t received) {
   try {
     const uint64_t ex_time{root["stamp"].asUInt64()};
@@ -95,17 +101,17 @@ boost::optional<const Tick> FeedParser::parse_trade(
 
     const double price{root["trade"].get("price", 0.0).asDouble()};
     const int32_t price_int{std::stoi(root["trade"].get("price_int", 0).asString())};
-    return boost::optional<const Tick>(Trade{
+    return boost::optional<Tick>(Trade{
         received, ex_time, trade_type, amount, amount_int, cyc, price, price_int});
   } catch (const std::exception& e) {
     Json::FastWriter writer;
     LOG(WARNING) << "Could not parse trade (" << e.what()
                  << ") json=" << writer.write(root);
-    return boost::optional<const Tick>();
+    return boost::optional<Tick>();
   }
 }
 
-boost::optional<const Tick> FeedParser::parse_depth(const Json::Value& root,
+boost::optional<Tick> FeedParser::parse_depth(const Json::Value& root,
                                               const uint64_t received) {
   try {
     const uint64_t ex_time{root["stamp"].asUInt64()};
@@ -137,20 +143,20 @@ boost::optional<const Tick> FeedParser::parse_depth(const Json::Value& root,
 
     const double price{std::stod(depth.get("price", "").asString())};
     const int32_t price_int{std::stoi(depth.get("price_int", "").asString())};
-    return boost::optional<const Tick>(Quote{received, ex_time, quote_type,
+    return boost::optional<Tick>(Quote{received, ex_time, quote_type,
             delta_volume, delta_volume_int, total_volume, total_volume_int,
             cyc, price, price_int});
   } catch (const std::exception& e) {
     Json::FastWriter writer;
     LOG(WARNING) << "Could not parse depth (" << e.what()
                  << ") json=" << writer.write(root);
-    return boost::optional<const Tick>();
+    return boost::optional<Tick>();
   }
 }
 
-boost::optional<const Tick> FeedParser::parse_ticker(const Json::Value& root,
-                                                     uint64_t received) {
-  return boost::optional<const Tick>();
+boost::optional<Tick> FeedParser::parse_ticker(const Json::Value& root,
+                                               uint64_t received) {
+  return boost::optional<Tick>();
 }
 
 

@@ -1,13 +1,10 @@
 #include "ticker_plant.hpp"
-#include "market_logger.hpp"
 #include "log_reporter.hpp"
 #include "mtgox.hpp"
 #include "enum_utils.hpp"
 
 #include <boost/program_options.hpp>
 #include <glog/logging.h>
-#include <json/value.h>
-#include <json/reader.h>
 
 #include <iostream>
 #include <iomanip>
@@ -24,19 +21,20 @@ using namespace std;
 using namespace btc_arb;
 
 namespace {
-enum class SourceType { FLAT, LDB, WS_MTGOX, LDB_MTGOX };
-enum class SinkType { FLAT, RAW_LDB };
+enum class SourceType { FLAT, FLAT_MTGOX, WS_MTGOX };
+enum class SinkType { FLAT, FLAT_RAW };
 }
 
 template<> char const* utils::EnumStrings<SourceType>::names[] = {
-  "flat", "ldb", "ws_mtgox", "ldb_mtgox"};
+  "flat", "flat_mtgox", "ws_mtgox"};
 template<> char const* utils::EnumStrings<SinkType>::names[] = {
-  "flat", "raw_ldb"};
+  "flat", "flat_raw"};
 
 namespace {
 template<typename T>
 struct PrependedPath {
   static PrependedPath parse(const string& spath);
+  static vector<PrependedPath<T>> parse_all(const vector<string>& s);
 
   T type;
   string path;
@@ -48,15 +46,15 @@ PrependedPath<T> PrependedPath<T>::parse(const string& spath) {
   if (delim == string::npos) {
     throw runtime_error("invalid path \'" + spath + "\'");
   }
-  stringstream type_str{spath.substr(0, delim)};
+  stringstream type_str{spath.substr(0, delim), ios::in};
+  string path{spath.substr(delim + 1)};
   T type;
   type_str >> utils::enum_from_str(type);
-  string path{spath.substr(delim + 1)};
   return PrependedPath<T>{move(type), move(path)};
 }
 
 template<typename T>
-vector<PrependedPath<T>> parse_all(const vector<string>& s) {
+vector<PrependedPath<T>> PrependedPath<T>::parse_all(const vector<string>& s) {
   vector<PrependedPath<T>> parsed(s.size());
   transform(s.begin(), s.end(), parsed.begin(), PrependedPath<T>::parse);
   return parsed;
@@ -102,67 +100,63 @@ int main(int argc, char **argv) {
       return 0;
     }
 
-    if (variables.count("sink")) {
-      auto sinks = variables["sink"].as<vector<string>>();
-      cout << "sinks: ";
-      for (auto& s : sinks) {
-        cout << s << " ";
-      }
-      cout << endl;
-
-      auto parsed = parse_all<SinkType>(sinks);
-      for_each(parsed.begin(), parsed.end(),
-               [](const PrependedPath<SinkType> &p) {
-                 cout << "sink " << utils::enum_to_str(p.type) << " " << p.path << endl;
-               });
-    }
-
     PrependedPath<SourceType> spath = PrependedPath<SourceType>::parse(source_str);
-    cout << "::: " << (utils::enum_to_str(spath.type)) << endl;
     unique_ptr<TickerPlant> plant{nullptr};
     switch (spath.type) {
       case SourceType::FLAT:
-        plant.reset(new FlatFileTickerPlant(spath.path));
+        plant.reset(new FileTickerPlant<FlatParser>(spath.path));
         break;
-      case SourceType::LDB:
-        plant.reset(new LdbTickerPlant<FlatParser>(spath.path));
+      case SourceType::FLAT_MTGOX:
+        plant.reset(new FileTickerPlant<mtgox::FeedParser>(spath.path));
         break;
       case SourceType::WS_MTGOX:
         plant.reset(new WebSocketTickerPlant<mtgox::FeedParser>(spath.path));
         break;
-      case SourceType::LDB_MTGOX:
-        plant.reset(new LdbTickerPlant<mtgox::FeedParser>(spath.path));
-        break;
     }
 
-    // LevelDBLogger market_log("market.leveldb");
-    // LevelDBLogger trades_log("trades.leveldb", only_trades);
-    vector<LdbLogger> raw_loggers;
-    vector<FileLogger> file_loggers;
-    FileLogger mlog("out.flat");
+    vector<FileLogger> loggers;
+    if (variables.count("sink")) {
+      auto sinks = PrependedPath<SinkType>::parse_all(
+          variables["sink"].as<vector<string>>());
+      loggers.reserve(sinks.size());
+      for_each(sinks.begin(), sinks.end(),
+               [&loggers, &plant](const PrependedPath<SinkType> &sink) {
+                 using TickLog = void(FileLogger::*)(const Tick&);
+                 using RawLog = void(FileLogger::*)(const string&);
+                 loggers.emplace_back(sink.path);
+                 switch(sink.type) {
+                   case SinkType::FLAT: {
+                     auto handler = bind(static_cast<TickLog>(&FileLogger::log),
+                                         &loggers.back(), ph::_1);
+                     plant->add_tick_handler(handler);
+                     break;
+                   }
+                   case SinkType::FLAT_RAW: {
+                     auto handler = bind(static_cast<RawLog>(&FileLogger::log),
+                                         &loggers.back(), ph::_1);
+                     plant->add_raw_handler(handler);
+                     break;
+                   }
+                 }
+                 cout << "sink " << utils::enum_to_str(sink.type) << " "
+                      << sink.path << endl;
+               });
+    }
 
-    cout << static_cast<int>(spath.type) << " " << spath.path << endl;
+    plant->add_tick_handler([](const Tick& tick) {
+        if (tick.type == Tick::Type::QUOTE) {
+          const Quote& quote = tick.as<Quote>();
+          LOG(INFO) << "Q " << quote.received << " " << quote.ex_time << " lag="
+                    << (quote.received - quote.ex_time)
+                    << " " << quote.total_volume << " @ " << quote.price;
 
-    // unique_ptr<TickerPlant> plant{new WebSocketTickerPlant(uri)};
-    // plant->add_tick_handler(bind(&LevelDBLogger::log_tick, &market_log, ph::_1));
-    // plant->add_tick_handler(bind(&LevelDBLogger::log_tick, &trades_log, ph::_1));
-    // plant->add_tick_handler(bind(&FlatFileLogger::log_tick, &mlog, ph::_1));
-    plant->add_tick_handler(report_progress_block);
-    plant->add_tick_handler([&mlog](const Tick& tick) {
-        // if (tick.type == Tick::Type::QUOTE) {
-        //   const Quote& quote = tick.as<Quote>();
-        //   LOG(INFO) << "Q " << quote.received << " " << quote.ex_time << " lag="
-        //             << (quote.received - quote.ex_time)
-        //             << " " << quote.total_volume << " @ " << quote.price;
-
-        // } else if (tick.type == Tick::Type::TRADE) {
-        //   const Trade& trade = tick.as<Trade>();
-        // }
-        // cout << static_cast<int>(tick.type) << endl;
-        // mlog.log(reinterpret_cast<const char *>(&tick), sizeof(Tick));
+        } else if (tick.type == Tick::Type::TRADE) {
+          const Trade& trade = tick.as<Trade>();
+        }
+        cout << static_cast<int>(tick.type) << endl;
       });
     LOG (INFO) << "starting ticker plant";
-    // plant->run();
+    plant->run();
   } catch (const boost::program_options::unknown_option& e) {
     LOG(ERROR) << e.what();
     return 1;
@@ -173,4 +167,5 @@ int main(int argc, char **argv) {
     LOG(ERROR) << e.what();
     return -1;
   }
+  return 0;
 }
